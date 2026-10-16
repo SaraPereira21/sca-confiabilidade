@@ -75,49 +75,127 @@ def read_upload(upload):
     return tempos, eventos
 
 def pdf_resumo(nome, unidade, resultado):
+    """Relatório completo: síntese, ranking e tabelas de confiabilidade de cada distribuição."""
     try:
         from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import mm
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     except Exception:
         return None
+
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
-    sty = getSampleStyleSheet()
-    ranking = resultado["ranking"]
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+        leftMargin=12*mm, rightMargin=12*mm, topMargin=12*mm, bottomMargin=12*mm)
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="SCASection", parent=styles["Heading2"], fontSize=13, leading=16, spaceBefore=8, spaceAfter=6))
+    styles.add(ParagraphStyle(name="SCASmall", parent=styles["BodyText"], fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name="SCATitle", parent=styles["Title"], fontSize=19, leading=22, alignment=TA_CENTER))
+
+    ranking = resultado["ranking"].copy()
     estudo = resultado["estudo"]
     w = resultado["weibull"]
     pref = resultado["selecao"]["modelo_preferencial"]
+
+    def fmt(v, casas=3):
+        try:
+            return "-" if v is None or not np.isfinite(float(v)) else f"{float(v):.{casas}f}"
+        except Exception:
+            return "-"
+
+    def pct(v, casas=1):
+        try:
+            return "-" if v is None or not np.isfinite(float(v)) else f"{float(v)*100:.{casas}f}%"
+        except Exception:
+            return "-"
+
+    def tab(dados, widths=None, fontsize=7):
+        t = Table(dados, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#5B3FD6")),
+            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+            ("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#D8D5CC")),
+            ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ("ALIGN",(0,0),(-1,-1),"LEFT"),
+            ("FONTSIZE",(0,0),(-1,-1),fontsize),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white, colors.HexColor("#F7F5FF")]),
+            ("LEFTPADDING",(0,0),(-1,-1),4), ("RIGHTPADDING",(0,0),(-1,-1),4),
+        ]))
+        return t
+
     story = [
-        Paragraph("SCA — Relatório para Validação Acadêmica", sty["Title"]),
-        Spacer(1,8),
-        Paragraph(f"<b>Estudo:</b> {nome}", sty["BodyText"]),
-        Paragraph(f"<b>Data:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", sty["BodyText"]),
-        Paragraph(f"<b>Base:</b> {estudo['n']} observações, {estudo['falhas']} falhas, {estudo['censuras']} censuras.", sty["BodyText"]),
-        Paragraph(f"<b>Modelo preferencial pelo AIC:</b> {pref}", sty["BodyText"]),
-        Spacer(1,8),
-        Paragraph("Ranking das distribuições", sty["Heading2"]),
+        Paragraph("SCA - Sistema de Confiabilidade de Ativos", styles["SCATitle"]),
+        Paragraph("Relatório completo para validação acadêmica", styles["Heading2"]),
+        Spacer(1,4),
+        Paragraph(f"<b>Estudo:</b> {nome}", styles["BodyText"]),
+        Paragraph(f"<b>Data:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["BodyText"]),
+        Paragraph(f"<b>Base:</b> {estudo['n']} observações; {estudo['falhas']} falhas; {estudo['censuras']} censuras.", styles["BodyText"]),
+        Paragraph(f"<b>Modelo preferencial pelo AIC:</b> {pref}", styles["BodyText"]),
+        Spacer(1,8), Paragraph("1. Ranking das distribuições", styles["SCASection"])
     ]
-    rows = [["Rank","Distribuição","AIC","ΔAIC","Peso"]]
+
+    rows = [["Rank","Distribuição","Log-Likelihood","AIC","BIC","Delta AIC","Peso Akaike","MTTF","B10","B50","B90","Tempo R alvo"]]
     for _,r in ranking.iterrows():
-        rows.append([str(int(r["Ranking"])), str(r["Distribuição"]), f'{r["AIC"]:.3f}', f'{r["Delta AIC"]:.3f}', f'{r["Peso Akaike"]*100:.1f}%'])
-    t=Table(rows, colWidths=[18*mm,50*mm,30*mm,30*mm,30*mm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#5b3fd6")),
-        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-        ("GRID",(0,0),(-1,-1),.35,colors.HexColor("#d9d5ca")),
-        ("FONTSIZE",(0,0),(-1,-1),8),
-    ]))
-    story += [t, Spacer(1,10),
-              Paragraph("Weibull 2P", sty["Heading2"]),
-              Paragraph(
-                  f"β={w['beta']:.4f}; η={w['eta']:.2f} {unidade}; "
-                  f"MTTF={w['mttf']:.2f} {unidade}; B10={w['b10']:.2f} {unidade}; "
-                  f"B50={w['b50']:.2f} {unidade}; B90={w['b90']:.2f} {unidade}.",
-                  sty["BodyText"]
-              )]
+        rows.append([str(int(r["Ranking"])),str(r["Distribuição"]),fmt(r.get("Log-Likelihood")),fmt(r.get("AIC")),
+                     fmt(r.get("BIC")),fmt(r.get("Delta AIC")),pct(r.get("Peso Akaike"),2),fmt(r.get("MTTF"),2),
+                     fmt(r.get("B10"),2),fmt(r.get("B50"),2),fmt(r.get("B90"),2),fmt(r.get("Tempo R Alvo"),2)])
+    story += [tab(rows,[12*mm,34*mm,24*mm,19*mm,19*mm,19*mm,22*mm,20*mm,18*mm,18*mm,18*mm,24*mm],6.5),
+              Spacer(1,6),
+              Paragraph("Menor AIC = modelo preferencial; Delta AIC <= 2 = modelo competitivo.",styles["SCASmall"]),
+              Spacer(1,8), Paragraph("2. Weibull 2P",styles["SCASection"]),
+              tab([["Beta",f"Eta ({unidade})",f"MTTF ({unidade})",f"B10 ({unidade})",f"B50 ({unidade})",f"B90 ({unidade})"],
+                   [fmt(w["beta"],4),fmt(w["eta"],2),fmt(w["mttf"],2),fmt(w["b10"],2),fmt(w["b50"],2),fmt(w["b90"],2)]],
+                  [28*mm]*6,8)]
+
+    beta=float(w["beta"])
+    fase = "mortalidade infantil / taxa decrescente" if beta < .95 else ("falhas aleatórias / taxa aproximadamente constante" if beta <= 1.05 else "desgaste/envelhecimento / taxa crescente")
+    story += [Spacer(1,5), Paragraph(f"<b>Interpretação:</b> beta={beta:.4f}: {fase}. A leitura é estatística e não identifica sozinha o mecanismo físico.",styles["SCASmall"])]
+
+    for i,(_,rr) in enumerate(ranking.iterrows(),1):
+        modelo=str(rr["Distribuição"])
+        info=resultado["modelos"][modelo]
+        dist=info["dist"]; params=info["parametros"]
+        story += [PageBreak(), Paragraph(f"3.{i} Análise completa - {modelo}",styles["SCASection"]),
+                  Paragraph(f"<b>Ranking:</b> {int(rr['Ranking'])} | <b>AIC:</b> {fmt(rr.get('AIC'))} | <b>Delta AIC:</b> {fmt(rr.get('Delta AIC'))} | <b>Peso Akaike:</b> {pct(rr.get('Peso Akaike'),2)}",styles["BodyText"]),
+                  Spacer(1,5)]
+
+        met=[["Indicador","Resultado"],["Log-Likelihood",fmt(rr.get("Log-Likelihood"),4)],["AIC",fmt(rr.get("AIC"),4)],
+             ["BIC",fmt(rr.get("BIC"),4)],["Delta AIC",fmt(rr.get("Delta AIC"),4)],["Peso Akaike",pct(rr.get("Peso Akaike"),2)],
+             [f"MTTF ({unidade})",fmt(rr.get("MTTF"),2)],[f"B10 ({unidade})",fmt(rr.get("B10"),2)],
+             [f"B50 ({unidade})",fmt(rr.get("B50"),2)],[f"B90 ({unidade})",fmt(rr.get("B90"),2)],
+             [f"Tempo na confiabilidade-alvo ({unidade})",fmt(rr.get("Tempo R Alvo"),2)]]
+        for k in ("MAE KM","RMSE KM","Desvio Máximo KM","Max Dev KM"):
+            if k in rr.index: met.append([k,pct(rr.get(k),2)])
+        story += [tab(met,[62*mm,42*mm],7.5),Spacer(1,8),
+                  Paragraph("Tabela completa de níveis de confiabilidade",styles["SCASection"]),
+                  Paragraph("R(t) é a confiabilidade; F(t)=1-R(t) é a probabilidade acumulada de falha.",styles["SCASmall"]),Spacer(1,3)]
+
+        niveis=[1,.95,.90,.85,.80,.75,.70,.65,.60,.55,.50,.45,.40,.35,.30,.25,.20,.15,.10,.05,.01]
+        cr=[["R(t)","F(t)",f"Tempo ({unidade})","Referência"]]
+        for rlevel in niveis:
+            tempo=0.0 if rlevel==1 else float(dist.isf(rlevel,*params))
+            ref="B10" if rlevel==.90 else ("B50" if rlevel==.50 else ("B90" if rlevel==.10 else ""))
+            cr.append([f"{rlevel*100:.0f}%",f"{(1-rlevel)*100:.0f}%",fmt(tempo,2),ref])
+        cr.append(["0%","100%","assintótico","não há tempo finito em distribuições não limitadas"])
+        story += [tab(cr,[25*mm,25*mm,35*mm,80*mm],7),Spacer(1,8)]
+
+        pontos=[("B10",rr.get("B10")),("Meta",rr.get("Tempo R Alvo")),("B50",rr.get("B50")),("MTTF",rr.get("MTTF")),("B90",rr.get("B90"))]
+        tr=[["Referência",f"Tempo ({unidade})","R(t)","F(t)"]]
+        for rot,tv in pontos:
+            try:
+                tv=float(tv)
+                if np.isfinite(tv):
+                    rv=float(dist.sf(tv,*params))
+                    tr.append([rot,fmt(tv,2),pct(rv,2),pct(1-rv,2)])
+            except Exception: pass
+        story += [Paragraph("Pontos principais em escala de tempo",styles["SCASection"]),tab(tr,[35*mm,35*mm,30*mm,30*mm],7.5)]
+
+    story += [PageBreak(),Paragraph("4. Observação para decisão de manutenção",styles["SCASection"]),
+              Paragraph("MTTF, B10, B50, B90 e o tempo de uma confiabilidade-alvo são referências estatísticas. O intervalo de manutenção deve também considerar criticidade, modo de falha, detectabilidade e consequências.",styles["BodyText"])]
+
     doc.build(story)
     buf.seek(0)
     return buf.getvalue()
@@ -318,4 +396,4 @@ with g4:
 
 pdf = pdf_resumo(nome, unidade, resultado)
 if pdf:
-    st.download_button("📄 Baixar relatório-resumo PDF", data=pdf, file_name=f"SCA_{nome.replace(' ','_')}.pdf", mime="application/pdf", use_container_width=True)
+    st.download_button("📄 Baixar relatório completo PDF", data=pdf, file_name=f"SCA_{nome.replace(' ','_')}.pdf", mime="application/pdf", use_container_width=True)
