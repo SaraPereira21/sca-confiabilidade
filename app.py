@@ -132,7 +132,7 @@ def pdf_resumo(nome, unidade, resultado):
         Spacer(1,4),
         Paragraph(f"<b>Estudo:</b> {nome}", styles["BodyText"]),
         Paragraph(f"<b>Data:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["BodyText"]),
-        Paragraph(f"<b>Base:</b> {estudo['n']} observações; {estudo['falhas']} falhas; {estudo['censuras']} censuras.", styles["BodyText"]),
+        Paragraph(f"<b>Base:</b> {estudo['n']} observações de vida; {estudo['falhas']} falhas; {estudo['censuras']} censuras.", styles["BodyText"]),
         Paragraph(f"<b>Modelo preferencial pelo AIC:</b> {pref}", styles["BodyText"]),
         Spacer(1,8), Paragraph("1. Ranking das distribuições", styles["SCASection"])
     ]
@@ -177,8 +177,9 @@ def pdf_resumo(nome, unidade, resultado):
         cr=[["R(t)","F(t)",f"Tempo ({unidade})","Referência"]]
         for rlevel in niveis:
             tempo=0.0 if rlevel==1 else float(dist.isf(rlevel,*params))
+            r_display = float(dist.sf(tempo,*params)) if rlevel==1 else rlevel
             ref="B10" if rlevel==.90 else ("B50" if rlevel==.50 else ("B90" if rlevel==.10 else ""))
-            cr.append([f"{rlevel*100:.0f}%",f"{(1-rlevel)*100:.0f}%",fmt(tempo,2),ref])
+            cr.append([f"{r_display*100:.2f}%" if rlevel==1 else f"{rlevel*100:.0f}%", f"{(1-r_display)*100:.2f}%" if rlevel==1 else f"{(1-rlevel)*100:.0f}%",fmt(tempo,2),ref])
         cr.append(["0%","100%","assintótico","não há tempo finito em distribuições não limitadas"])
         story += [tab(cr,[25*mm,25*mm,35*mm,80*mm],7),Spacer(1,8)]
 
@@ -204,7 +205,7 @@ with st.sidebar:
     st.markdown("## SCA")
     st.caption("Sistema de Confiabilidade de Ativos")
     st.markdown("---")
-    pagina = st.radio("Navegação", ["Análise", "Metodologia"], label_visibility="collapsed")
+    pagina = st.radio("Navegação", ["Análise de Vida", "Metodologia", "MTBF e aplicação"], label_visibility="collapsed")
     st.markdown("---")
     st.caption("Versão DEMO • Validação acadêmica\n\nSem login • Sem acesso à base operacional")
 
@@ -217,22 +218,42 @@ st.markdown(
 )
 
 if pagina == "Metodologia":
-    st.markdown("## Metodologia")
+    st.markdown("## Metodologia da Análise de Vida")
     st.markdown("""
-O SCA compara distribuições candidatas por máxima verossimilhança e utiliza o **AIC** como critério principal de seleção.
-Modelos com **ΔAIC ≤ 2** são apresentados como estatisticamente competitivos. A curva **Kaplan-Meier** é usada como
-referência empírica da confiabilidade observada, inclusive quando há censura à direita.
+A unidade estatística desta análise é uma **observação de vida**, e não necessariamente um equipamento distinto. Um mesmo ativo pode contribuir com mais de uma vida quando um componente falha, é substituído/reparado e volta à operação.
 
-Na análise Weibull 2P, **β < 1** é compatível com mortalidade infantil, **β ≈ 1** com falhas aproximadamente aleatórias
-e **β > 1** com taxa de falha crescente / desgaste. Essa interpretação descreve o comportamento estatístico e não,
-isoladamente, o mecanismo físico da falha.
+**Falha** significa que o tempo até a ocorrência foi observado. **Censura à direita** significa que a falha ainda não foi observada: sabemos apenas que o componente sobreviveu pelo menos até o tempo informado. As censuras não devem ser descartadas, pois carregam informação de sobrevivência.
 
-B10, B50, B90, MTTF e tempos associados a uma confiabilidade-alvo são referências estatísticas. O SCA não transforma
-automaticamente esses valores em intervalos obrigatórios de manutenção preventiva.
+O SCA usa **Kaplan-Meier** como referência empírica de confiabilidade e ajusta distribuições paramétricas candidatas por **máxima verossimilhança**, considerando falhas e censuras. O **AIC** é o critério principal de comparação: menor AIC indica maior suporte relativo dentro do conjunto de modelos avaliados; **ΔAIC ≤ 2** indica modelos estatisticamente competitivos. Isso não prova que uma distribuição seja a “verdadeira”.
+
+Na **Weibull 2P**, β < 1 é compatível com taxa de falha decrescente; β ≈ 1 com taxa aproximadamente constante; e β > 1 com taxa crescente. Essa leitura descreve o comportamento estatístico e **não identifica, sozinha, o mecanismo físico da falha**.
+
+**R(t)** é a probabilidade estimada de sobreviver além de t; **F(t)=1−R(t)** é a probabilidade acumulada de falhar até t. **B10, B50 e B90** são tempos associados a 10%, 50% e 90% de falhas acumuladas. **MTTF** é a vida média estimada até a falha e não é, automaticamente, um intervalo de manutenção preventiva.
+
+A decisão de manutenção deve combinar os resultados estatísticos com **criticidade, modo de falha, detectabilidade, consequências, condição do ativo e custos**.
 """)
+    st.info("**Escopo desta tela:** análise de vida de componentes/itens. MTBF é tratado separadamente como indicador de confiabilidade operacional de itens reparáveis.")
     st.stop()
 
-st.markdown("## Análise")
+if pagina == "MTBF e aplicação":
+    st.markdown("## MTBF e aplicação no SCA")
+    st.markdown("""
+O **MTBF (Mean Time Between Failures)** responde a uma pergunta diferente da análise de vida: **com que frequência um item reparável apresenta falhas durante sua operação?**
+
+No SCA, o MTBF deve ser tratado em um módulo de **Confiabilidade Operacional**, separado da Análise de Vida. Ele poderá ser analisado nos níveis **frota → ativo → sistema → componente/posição funcional**, desde que esteja claro o que conta como falha e qual foi a exposição operacional.
+
+Para uma estimativa operacional simples, usa-se **tempo total de operação/exposição ÷ número de falhas**. Equipamentos que operaram e não falharam também contribuem com exposição. Já a Análise de Vida utiliza cada vida observada — falha ou censura — para modelar a distribuição do tempo até falhar.
+""")
+    st.markdown("### Exemplo — cilindro de elevação direito")
+    st.dataframe(pd.DataFrame([
+        {"Ativo":"EH-151","Vida observada (h)":3200,"Evento":"Falha","Uso na análise":"Vida até falha"},
+        {"Ativo":"EH-152","Vida observada (h)":4600,"Evento":"Censura","Uso na análise":"Sobreviveu pelo menos até 4.600 h"},
+        {"Ativo":"EH-153","Vida observada (h)":2850,"Evento":"Falha","Uso na análise":"Vida até falha"},
+    ]), hide_index=True, use_container_width=True)
+    st.warning("**Não confundir:** MTTF descreve a vida média estimada até a falha; MTBF descreve o intervalo/exposição média entre ocorrências de falha de um item reparável. Nenhum deles deve ser convertido automaticamente em periodicidade preventiva.")
+    st.stop()
+
+st.markdown("## Análise de Vida")
 fonte = st.selectbox(
     "Conjunto de dados",
     ["Exercício — Eixo Mecânico (30 falhas)", "Exercício — Quebra de Bombas (28 falhas)", "Enviar meu arquivo Excel/CSV"],
@@ -244,9 +265,9 @@ if fonte.startswith("Exercício — Eixo"):
 elif fonte.startswith("Exercício — Quebra"):
     tempos, eventos, nome_default = BOMBAS, [1]*len(BOMBAS), "Quebra de Bombas"
 else:
-    upload = st.file_uploader("Arquivo com colunas Tempo e Falha (1=falha; 0=censura)", type=["xlsx","xls","csv"])
+    upload = st.file_uploader("Arquivo com colunas Tempo e Falha (1 = falha; 0 = censura)", type=["xlsx","xls","csv"], help="Cada linha representa uma observação de vida. A identificação do ativo pode existir no arquivo para rastreabilidade, mas o motor usa Tempo e Falha/Censura no cálculo.")
     if upload is None:
-        st.info("Envie um arquivo para iniciar.")
+        st.info("Envie um arquivo para iniciar. **Cada linha deve representar uma observação de vida**, e não necessariamente um equipamento diferente.")
         st.stop()
     try:
         tempos, eventos = read_upload(upload)
@@ -254,6 +275,12 @@ else:
     except Exception as ex:
         st.error(str(ex))
         st.stop()
+
+st.markdown("""
+<div class="sca-card"><span class="sca-pill">COMO LER A BASE</span>
+<p><b>Cada linha = uma observação de vida.</b> Falha: o tempo até a falha foi observado. Censura: o item ainda não falhou e sobreviveu pelo menos até o tempo informado.</p>
+<p class="small-note">Um mesmo equipamento pode fornecer várias vidas ao longo do histórico após reparos ou substituições do componente.</p></div>
+""", unsafe_allow_html=True)
 
 c1,c2,c3 = st.columns(3)
 with c1:
@@ -292,7 +319,7 @@ fase, comportamento = fase_weibull(float(w["beta"]))
 
 st.markdown("## Síntese da análise")
 m1,m2,m3,m4 = st.columns(4)
-m1.metric("Observações", estudo["n"])
+m1.metric("Observações de vida", estudo["n"])
 m2.metric("Falhas", estudo["falhas"])
 m3.metric("Censuras", estudo["censuras"])
 m4.metric("Modelo preferencial", pref_nome)
@@ -397,3 +424,5 @@ with g4:
 pdf = pdf_resumo(nome, unidade, resultado)
 if pdf:
     st.download_button("📄 Baixar relatório completo PDF", data=pdf, file_name=f"SCA_{nome.replace(' ','_')}.pdf", mime="application/pdf", use_container_width=True)
+
+st.caption("SCA • Versão para validação acadêmica • Resultados estatísticos devem ser interpretados em conjunto com evidências de engenharia e manutenção.")
