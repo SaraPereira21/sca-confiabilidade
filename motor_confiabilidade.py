@@ -5,7 +5,7 @@
 # - falhas completas e censura à direita;
 # - Kaplan-Meier;
 # - Exponencial, Weibull 2P, Lognormal 2P, Normal, Gamma 2P,
-#   Logística e Valor Extremo (Gumbel máximo);
+#   Logística e Valor Extremo (Gumbel mínimo);
 # - MLE, Log-Likelihood, AIC, BIC, Delta AIC e Peso de Akaike;
 # - MTTF, desvio, mediana, quartis, B10/B50/B90;
 # - confiabilidade/probabilidade de falha em uma missão;
@@ -30,7 +30,7 @@ from scipy.stats import (
     norm,
     gamma,
     logistic,
-    gumbel_r,
+    gumbel_l,
 )
 
 
@@ -41,7 +41,7 @@ DISTRIBUICOES = {
     "Normal": {"dist": norm, "fixar_loc_zero": False, "k": 2},
     "Gamma": {"dist": gamma, "fixar_loc_zero": True, "k": 2},
     "Logística": {"dist": logistic, "fixar_loc_zero": False, "k": 2},
-    "Valor Extremo": {"dist": gumbel_r, "fixar_loc_zero": False, "k": 2},
+    "Valor Extremo": {"dist": gumbel_l, "fixar_loc_zero": False, "k": 2},
 }
 
 
@@ -745,7 +745,7 @@ def executar_relatorio_completo(exibir_graficos=True):
 
         "Valor Extremo": {
 
-            "dist": gumbel_r,
+            "dist": gumbel_l,
 
             "fixar_loc_zero": False,
 
