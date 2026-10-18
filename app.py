@@ -9,12 +9,20 @@ import streamlit as st
 
 from motor_confiabilidade import analisar_confiabilidade
 
+SCA_ENGINE_VERSION = "2026.10.18-gumbel-min-v1"
+
 st.set_page_config(
     page_title="SCA — Validação Acadêmica",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Evita reutilizar na interface um resultado calculado por uma versão anterior do motor.
+if st.session_state.get("sca_engine_version") != SCA_ENGINE_VERSION:
+    st.session_state.pop("sca_resultado", None)
+    st.session_state.pop("sca_contexto", None)
+    st.session_state["sca_engine_version"] = SCA_ENGINE_VERSION
 
 st.markdown("""
 <style>
@@ -415,8 +423,8 @@ st.info(f"**Interpretação:** {fase}; {comportamento}. β caracteriza o comport
 # Incerteza estatística — IC 95% já calculado pelo motor validado para Weibull 2P.
 ic95 = w.get("ic95", {})
 if ic95.get("disponivel"):
-    st.markdown("### Intervalos de confiança — Weibull 2P")
-    st.caption("IC 95%: faixa de incerteza estatística ao redor da estimativa. Limite inferior (LI) e limite superior (LS) não são limites operacionais do equipamento.")
+    st.markdown("### Limites — Weibull 2P")
+    st.caption("Limites inferior e superior da estimativa. Não representam limites operacionais do equipamento.")
     ic_rows = []
     for rotulo, chave, sufixo in [("β", "beta", ""), ("η", "eta", unidade), ("B10", "B10", unidade), ("B50", "B50", unidade), ("B90", "B90", unidade)]:
         item = ic95.get(chave, {})
@@ -424,8 +432,8 @@ if ic95.get("disponivel"):
             ic_rows.append({
                 "Parâmetro": rotulo,
                 "Estimativa": f'{item["estimativa"]:.4f}' if chave == "beta" else f'{item["estimativa"]:.2f} {sufixo}'.strip(),
-                "LI 95%": f'{item["ic95_inferior"]:.4f}' if chave == "beta" else f'{item["ic95_inferior"]:.2f} {sufixo}'.strip(),
-                "LS 95%": f'{item["ic95_superior"]:.4f}' if chave == "beta" else f'{item["ic95_superior"]:.2f} {sufixo}'.strip(),
+                "Limite inferior": f'{item["ic95_inferior"]:.4f}' if chave == "beta" else f'{item["ic95_inferior"]:.2f} {sufixo}'.strip(),
+                "Limite superior": f'{item["ic95_superior"]:.4f}' if chave == "beta" else f'{item["ic95_superior"]:.2f} {sufixo}'.strip(),
             })
     st.dataframe(pd.DataFrame(ic_rows), hide_index=True, use_container_width=True)
 else:
