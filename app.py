@@ -9,7 +9,7 @@ import streamlit as st
 
 from motor_confiabilidade import analisar_confiabilidade
 
-SCA_ENGINE_VERSION = "2026.10.18-km-concordancia-v1"
+SCA_ENGINE_VERSION = "2026.10.18-final-v1"
 
 st.set_page_config(
     page_title="SCA — Validação Acadêmica",
@@ -151,7 +151,7 @@ def pdf_resumo(nome, unidade, resultado):
         Paragraph(f"<b>Estudo:</b> {nome}", styles["BodyText"]),
         Paragraph(f"<b>Data:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["BodyText"]),
         Paragraph(f"<b>Base:</b> {estudo['n']} observações de vida; {estudo['falhas']} falhas; {estudo['censuras']} censuras.", styles["BodyText"]),
-        Paragraph(f"<b>Modelo preferencial:</b> {pref}", styles["BodyText"]),
+        Paragraph(f"<b>Modelo sugerido pelo critério estatístico:</b> {pref}", styles["BodyText"]),
         Spacer(1,8), Paragraph("1. Ranking das distribuições", styles["SCASection"])
     ]
 
@@ -225,15 +225,37 @@ with st.sidebar:
     st.markdown("---")
     pagina = st.radio("Navegação", ["Análise de Vida", "Metodologia"], label_visibility="collapsed")
     st.markdown("---")
-    st.caption("Versão DEMO • Validação acadêmica\n\nSem login • Sem acesso à base operacional")
+    st.caption("Versão pública • Análise de confiabilidade\n\nSem login • Sem acesso à base operacional")
 
 st.markdown("# SCA — Sistema de Confiabilidade de Ativos")
 st.markdown(
-    '<div class="sca-card"><span class="sca-pill">VERSÃO PARA VALIDAÇÃO ACADÊMICA</span>'
+    '<div class="sca-card"><span class="sca-pill">SISTEMA DE CONFIABILIDADE DE ATIVOS</span>'
     '<h3>Análise estatística aplicada à confiabilidade</h3>'
-    '<p>Esta versão não grava dados no banco operacional. Os cálculos são executados apenas durante a sessão.</p></div>',
+    '<p>Análise estatística de dados de vida, confiabilidade e comportamento de falhas.</p></div>',
     unsafe_allow_html=True
 )
+
+
+with st.expander("📘 Como interpretar as análises e gráficos", expanded=True):
+    st.markdown("""
+**O SCA calcula, compara e sugere. A decisão final é do analista.** A distribuição sugerida automaticamente é uma
+referência estatística e deve ser confrontada com os diagnósticos, o comportamento do risco, o mecanismo físico de falha
+e a qualidade dos dados.
+
+- **Kaplan-Meier (KM):** confiabilidade empírica observada, sem impor previamente uma distribuição; incorpora censuras.
+- **Kaplan-Meier × distribuição:** compara KM com R(t) do modelo nos mesmos tempos. Pontos próximos da diagonal indicam maior concordância. **Cor** é diagnóstico complementar, não critério isolado de escolha.
+- **Confiabilidade R(t):** probabilidade estimada de sobreviver além do tempo *t*.
+- **Falha acumulada F(t):** probabilidade de falhar até *t*; **F(t)=1−R(t)**.
+- **Densidade f(t):** mostra onde os tempos de falha tendem a se concentrar; não é uma probabilidade isolada.
+- **Taxa de risco h(t):** propensão instantânea de falha entre os itens sobreviventes. Crescente pode ser compatível com desgaste; aproximadamente constante, com falhas aleatórias; decrescente, com mortalidade infantil. A forma estatística não identifica sozinha o mecanismo físico.
+- **AIC / ΔAIC / Peso de Akaike:** comparam modelos candidatos. Menor AIC recebe maior suporte relativo; **ΔAIC ≤ 2** indica modelos competitivos.
+- **MTTF:** vida média estimada até a falha.
+- **B10 / B50 / B90:** tempos em que 10%, 50% e 90% da população, respectivamente, já falharam.
+- **Falha:** tempo até a falha foi observado. **Censura:** o item ainda funcionava no fim da observação; sabemos que sobreviveu pelo menos até aquele tempo.
+
+**Importante:** MTTF, B10, B50, B90 e a confiabilidade-alvo são referências estatísticas e não se tornam automaticamente intervalos de manutenção.
+""")
+    st.info("Fluxo recomendado: dados → Kaplan-Meier → ajuste das distribuições → comparação estatística → diagnósticos gráficos → interpretação física → decisão do analista.")
 
 if pagina == "Metodologia":
     st.markdown("## Metodologia da Análise de Vida")
@@ -346,7 +368,7 @@ m4.metric("Modelo preferencial", pref_nome)
 
 st.markdown(
     f'<div class="sca-card"><span class="sca-pill">CONCLUSÃO TÉCNICA</span>'
-    f'<h3>Distribuição preferencial: {pref_nome}</h3>'
+    f'<h3>Modelo sugerido pelo critério estatístico: {pref_nome}</h3>'
     f'<p>Weibull 2P: β = <b>{w["beta"]:.2f}</b> — {fase}; {comportamento}.</p>'
     f'<p class="small-note">A seleção do modelo é estatística. A interpretação física deve considerar modos de falha e evidências de campo.</p></div>',
     unsafe_allow_html=True
@@ -440,69 +462,119 @@ else:
     st.caption("Intervalos de confiança da Weibull indisponíveis para esta amostra: " + str(ic95.get("motivo", "não foi possível estimar a incerteza.")))
 
 st.markdown("## Diagnósticos por distribuição")
-modelo = st.selectbox("Distribuição para inspeção", ranking["Distribuição"].tolist())
-rr = ranking.loc[ranking["Distribuição"]==modelo].iloc[0]
-mi = resultado["modelos"][modelo]
-d=mi["dist"]; p=mi["parametros"]
-x=np.linspace(0,max(tempos)*1.10,400)
-sf=d.sf(x,*p); pdf=d.pdf(x,*p)
-with np.errstate(divide="ignore",invalid="ignore"):
-    haz=np.where(sf>1e-12,pdf/sf,np.nan)
+opcoes_modelos = ranking["Distribuição"].tolist()
 
-# Diagnóstico de concordância no mesmo conceito da extensão usada em aula:
-# eixo X = Kaplan-Meier; eixo Y = R(t) do modelo nos mesmos tempos.
-km_diag = resultado["kaplan_meier"].copy()
-km_x = km_diag["Confiabilidade KM"].to_numpy(dtype=float)
-modelo_y = d.sf(km_diag["Tempo"].to_numpy(dtype=float), *p)
-cor_km = float(rr.get("Correlação KM", np.nan))
-st.markdown(f"### Kaplan-Meier × {modelo}")
-fig, ax = plt.subplots(figsize=(6.2,5.2))
-ax.scatter(km_x, modelo_y, s=28, label=modelo)
-lo = float(min(np.nanmin(km_x), np.nanmin(modelo_y), 0.0))
-hi = float(max(np.nanmax(km_x), np.nanmax(modelo_y), 1.0))
-ax.plot([lo, hi], [lo, hi], linewidth=1.8, label="Concordância perfeita")
-ax.set_xlim(max(-0.05, lo-0.03), min(1.05, hi+0.03))
-ax.set_ylim(max(-0.05, lo-0.03), min(1.05, hi+0.03))
-ax.set_xlabel("Kaplan-Meier")
-ax.set_ylabel(modelo)
-ax.grid(alpha=.2)
-ax.legend(fontsize=8)
-if np.isfinite(cor_km):
-    ax.text(0.04, 0.93, f"Cor = {cor_km:.3f}", transform=ax.transAxes, fontweight="bold")
-st.pyplot(fig, use_container_width=False)
-plt.close(fig)
-st.caption("Cada ponto compara a confiabilidade empírica de Kaplan-Meier com R(t) estimada pelo modelo no mesmo tempo. Quanto mais próximos da diagonal, maior a concordância. Cor é a correlação linear entre as duas séries e deve ser usada como diagnóstico complementar, não isoladamente como prova de melhor modelo.")
+csel1, csel2 = st.columns([1, 2])
+with csel1:
+    analisar_todas = st.checkbox("Analisar todas as distribuições", value=False)
+with csel2:
+    if analisar_todas:
+        modelos_selecionados = opcoes_modelos
+        st.caption(f"{len(modelos_selecionados)} distribuições selecionadas.")
+    else:
+        modelos_selecionados = st.multiselect(
+            "Escolha uma ou mais distribuições",
+            opcoes_modelos,
+            default=[pref_nome] if pref_nome in opcoes_modelos else [opcoes_modelos[0]],
+        )
 
-g1,g2=st.columns(2)
-with g1:
-    fig,ax=plt.subplots(figsize=(7,4)); ax.plot(x,sf); ax.set_title(f"Confiabilidade R(t) — {modelo}"); ax.grid(alpha=.2); st.pyplot(fig,use_container_width=True); plt.close(fig)
-    st.caption("Interpretação: probabilidade estimada de sobreviver além do tempo t.")
-with g2:
-    fig,ax=plt.subplots(figsize=(7,4)); ax.plot(x,pdf); ax.set_title(f"Densidade f(t) — {modelo}"); ax.grid(alpha=.2); st.pyplot(fig,use_container_width=True); plt.close(fig)
-    st.caption("Interpretação: concentração dos tempos de falha previstos pelo modelo.")
+if not modelos_selecionados:
+    st.info("Selecione pelo menos uma distribuição para visualizar os diagnósticos.")
+else:
+    for modelo in modelos_selecionados:
+        rr = ranking.loc[ranking["Distribuição"] == modelo].iloc[0]
+        mi = resultado["modelos"][modelo]
+        d = mi["dist"]; p = mi["parametros"]
+        x = np.linspace(0, max(tempos) * 1.10, 400)
+        sf = d.sf(x, *p)
+        pdf_modelo = d.pdf(x, *p)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            haz = np.where(sf > 1e-12, pdf_modelo / sf, np.nan)
 
-g3,g4=st.columns(2)
-with g3:
-    fig,ax=plt.subplots(figsize=(7,4)); ax.plot(x,haz); ax.set_title(f"Taxa de risco h(t) — {modelo}"); ax.grid(alpha=.2); st.pyplot(fig,use_container_width=True); plt.close(fig)
-    st.caption("Interpretação: intensidade instantânea de falha entre itens que sobreviveram até t.")
-with g4:
-    km_plot = resultado["kaplan_meier"].copy()
-    km_t = np.r_[0.0, km_plot["Tempo"].to_numpy(dtype=float)]
-    km_s = np.r_[1.0, km_plot["Confiabilidade KM"].to_numpy(dtype=float)]
-    fig,ax=plt.subplots(figsize=(7,4))
-    ax.step(km_t, km_s, where="post", linewidth=2.0, label="Kaplan-Meier")
-    ax.plot(x, sf, linewidth=2.0, label=f"{modelo}")
-    cens = km_plot[km_plot["Censuras"] > 0]
-    if not cens.empty:
-        ax.scatter(cens["Tempo"], cens["Confiabilidade KM"], marker="+", s=55, label="Censura")
-    ax.set_title(f"Kaplan-Meier × {modelo}")
-    ax.set_xlabel(f"Tempo ({unidade})"); ax.set_ylabel("Confiabilidade")
-    ax.set_ylim(0,1.05); ax.grid(alpha=.2); ax.legend(fontsize=8)
-    st.pyplot(fig,use_container_width=True); plt.close(fig)
-    st.caption("Interpretação: a escada é a confiabilidade empírica de Kaplan-Meier; a curva contínua é o modelo ajustado. Quanto mais próxima a curva estiver da escada, maior a aderência visual.")
+        st.markdown(f"### {modelo}")
+        st.caption(
+            f"AIC {rr['AIC']:.3f} · ΔAIC {rr['Delta AIC']:.3f} · "
+            f"Cor KM {rr.get('Correlação KM', np.nan):.3f} · "
+            f"MAE × KM {rr['MAE KM']*100:.2f}% · RMSE × KM {rr['RMSE KM']*100:.2f}%"
+        )
+
+        km_diag = resultado["kaplan_meier"].copy()
+        km_x = km_diag["Confiabilidade KM"].to_numpy(dtype=float)
+        modelo_y = d.sf(km_diag["Tempo"].to_numpy(dtype=float), *p)
+        cor_km = float(rr.get("Correlação KM", np.nan))
+
+        fig, ax = plt.subplots(figsize=(6.0, 5.0))
+        ax.scatter(km_x, modelo_y, s=28, label=modelo)
+        lo = float(min(np.nanmin(km_x), np.nanmin(modelo_y), 0.0))
+        hi = float(max(np.nanmax(km_x), np.nanmax(modelo_y), 1.0))
+        ax.plot([lo, hi], [lo, hi], linewidth=1.8, label="Concordância perfeita")
+        ax.set_xlim(max(-0.05, lo - 0.03), min(1.05, hi + 0.03))
+        ax.set_ylim(max(-0.05, lo - 0.03), min(1.05, hi + 0.03))
+        ax.set_xlabel("Kaplan-Meier"); ax.set_ylabel(modelo)
+        ax.set_title(f"Kaplan-Meier × {modelo}")
+        ax.grid(alpha=.2); ax.legend(fontsize=8)
+        if np.isfinite(cor_km):
+            ax.text(0.04, 0.93, f"Cor = {cor_km:.3f}", transform=ax.transAxes, fontweight="bold")
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+        st.caption("Concordância entre a confiabilidade empírica e o modelo. Pontos próximos da diagonal indicam melhor concordância visual; Cor é um diagnóstico complementar.")
+
+        g1, g2 = st.columns(2)
+        with g1:
+            fig, ax = plt.subplots(figsize=(6.0, 4.2))
+            ax.plot(x, sf)
+            ax.set_title(f"Confiabilidade R(t) — {modelo}")
+            ax.set_xlabel(f"Tempo ({unidade})"); ax.set_ylabel("Confiabilidade")
+            ax.set_ylim(-0.03, 1.03); ax.grid(alpha=.2)
+            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            st.caption("Probabilidade estimada de sobreviver além do tempo t.")
+        with g2:
+            fig, ax = plt.subplots(figsize=(6.0, 4.2))
+            ax.plot(x, 1 - sf)
+            ax.set_title(f"Falha acumulada F(t) — {modelo}")
+            ax.set_xlabel(f"Tempo ({unidade})"); ax.set_ylabel("Probabilidade acumulada de falha")
+            ax.set_ylim(-0.03, 1.03); ax.grid(alpha=.2)
+            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            st.caption("Probabilidade acumulada de falhar até o tempo t; F(t)=1−R(t).")
+
+        g3, g4 = st.columns(2)
+        with g3:
+            fig, ax = plt.subplots(figsize=(6.0, 4.2))
+            ax.plot(x, pdf_modelo)
+            ax.set_title(f"Densidade de falha f(t) — {modelo}")
+            ax.set_xlabel(f"Tempo ({unidade})"); ax.set_ylabel("Densidade")
+            ax.grid(alpha=.2)
+            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            st.caption("Mostra onde os tempos de falha previstos pelo modelo tendem a se concentrar.")
+        with g4:
+            fig, ax = plt.subplots(figsize=(6.0, 4.2))
+            ax.plot(x, haz)
+            ax.set_title(f"Taxa de risco h(t) — {modelo}")
+            ax.set_xlabel(f"Tempo ({unidade})"); ax.set_ylabel("Risco")
+            ax.grid(alpha=.2)
+            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            st.caption("Propensão instantânea de falha entre os itens que sobreviveram até t.")
+
+        # Curva temporal KM × modelo continua disponível porque responde a outra pergunta.
+        km_t = np.r_[0.0, km_diag["Tempo"].to_numpy(dtype=float)]
+        km_s = np.r_[1.0, km_diag["Confiabilidade KM"].to_numpy(dtype=float)]
+        fig, ax = plt.subplots(figsize=(7.0, 4.2))
+        ax.step(km_t, km_s, where="post", linewidth=2.0, label="Kaplan-Meier")
+        ax.plot(x, sf, linewidth=2.0, label=modelo)
+        cens = km_diag[km_diag["Censuras"] > 0]
+        if not cens.empty:
+            ax.scatter(cens["Tempo"], cens["Confiabilidade KM"], marker="+", s=55, label="Censura")
+        ax.set_title(f"Confiabilidade observada × ajustada — {modelo}")
+        ax.set_xlabel(f"Tempo ({unidade})"); ax.set_ylabel("Confiabilidade")
+        ax.set_ylim(0, 1.05); ax.grid(alpha=.2); ax.legend(fontsize=8)
+        st.pyplot(fig, use_container_width=True); plt.close(fig)
+        st.caption("A escada é Kaplan-Meier e a curva contínua é o modelo ajustado ao longo do tempo.")
+
+        st.info("Use os gráficos em conjunto. O SCA sugere um modelo pelo critério estatístico, mas a escolha final deve considerar também a aderência visual e a coerência física do comportamento de falha.")
+        st.divider()
 
 pdf = pdf_resumo(nome, unidade, resultado)
 if pdf:
     st.download_button("📄 Baixar relatório completo PDF", data=pdf, file_name=f"SCA_{nome.replace(' ','_')}.pdf", mime="application/pdf", use_container_width=True)
 
-st.caption("SCA • Versão para validação acadêmica • Resultados estatísticos devem ser interpretados em conjunto com evidências de engenharia e manutenção.")
+st.caption("SCA • Sistema de Confiabilidade de Ativos • Resultados estatísticos devem ser interpretados em conjunto com evidências de engenharia e manutenção.")
