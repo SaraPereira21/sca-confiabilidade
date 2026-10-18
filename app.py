@@ -235,24 +235,6 @@ A decisão de manutenção deve combinar os resultados estatísticos com **criti
     st.info("**Escopo desta tela:** análise de vida de componentes/itens. MTBF é tratado separadamente como indicador de confiabilidade operacional de itens reparáveis.")
     st.stop()
 
-if pagina == "MTBF e aplicação":
-    st.markdown("## MTBF e aplicação no SCA")
-    st.markdown("""
-O **MTBF (Mean Time Between Failures)** responde a uma pergunta diferente da análise de vida: **com que frequência um item reparável apresenta falhas durante sua operação?**
-
-No SCA, o MTBF deve ser tratado em um módulo de **Confiabilidade Operacional**, separado da Análise de Vida. Ele poderá ser analisado nos níveis **frota → ativo → sistema → componente/posição funcional**, desde que esteja claro o que conta como falha e qual foi a exposição operacional.
-
-Para uma estimativa operacional simples, usa-se **tempo total de operação/exposição ÷ número de falhas**. Equipamentos que operaram e não falharam também contribuem com exposição. Já a Análise de Vida utiliza cada vida observada — falha ou censura — para modelar a distribuição do tempo até falhar.
-""")
-    st.markdown("### Exemplo — cilindro de elevação direito")
-    st.dataframe(pd.DataFrame([
-        {"Ativo":"EH-151","Vida observada (h)":3200,"Evento":"Falha","Uso na análise":"Vida até falha"},
-        {"Ativo":"EH-152","Vida observada (h)":4600,"Evento":"Censura","Uso na análise":"Sobreviveu pelo menos até 4.600 h"},
-        {"Ativo":"EH-153","Vida observada (h)":2850,"Evento":"Falha","Uso na análise":"Vida até falha"},
-    ]), hide_index=True, use_container_width=True)
-    st.warning("**Não confundir:** MTTF descreve a vida média estimada até a falha; MTBF descreve o intervalo/exposição média entre ocorrências de falha de um item reparável. Nenhum deles deve ser convertido automaticamente em periodicidade preventiva.")
-    st.stop()
-
 st.markdown("## Análise de Vida")
 fonte = st.selectbox(
     "Conjunto de dados",
@@ -295,18 +277,38 @@ missao = None
 if usar_missao:
     missao = st.number_input(f"Missão ({unidade})", min_value=0.01, value=float(np.median(tempos)), step=1.0)
 
-if not st.button("Executar análise", type="primary", use_container_width=True):
+executar = st.button("Executar análise", type="primary", use_container_width=True)
+
+if executar:
+    try:
+        resultado_novo = analisar_confiabilidade(
+            tempos=tempos, eventos=eventos, missao=missao,
+            confiabilidade_alvo=alvo_pct/100.0,
+            nome_equipamento=nome, unidade=unidade
+        )
+        st.session_state["sca_resultado"] = resultado_novo
+        st.session_state["sca_contexto"] = {
+            "tempos": list(tempos), "eventos": list(eventos), "missao": missao,
+            "alvo_pct": float(alvo_pct), "nome": nome, "unidade": unidade, "fonte": fonte
+        }
+    except Exception as ex:
+        st.error(f"Erro na análise: {ex}")
+        st.stop()
+
+if "sca_resultado" not in st.session_state:
+    st.info("Configure os dados e clique em **Executar análise**.")
     st.stop()
 
-try:
-    resultado = analisar_confiabilidade(
-        tempos=tempos, eventos=eventos, missao=missao,
-        confiabilidade_alvo=alvo_pct/100.0,
-        nome_equipamento=nome, unidade=unidade
-    )
-except Exception as ex:
-    st.error(f"Erro na análise: {ex}")
-    st.stop()
+resultado = st.session_state["sca_resultado"]
+ctx = st.session_state.get("sca_contexto", {})
+# Mantém a análise visível durante interações com os diagnósticos.
+# Se os controles de entrada mudarem, a nova configuração só entra no cálculo após novo clique em Executar análise.
+tempos = ctx.get("tempos", tempos)
+eventos = ctx.get("eventos", eventos)
+missao = ctx.get("missao", missao)
+alvo_pct = ctx.get("alvo_pct", alvo_pct)
+nome = ctx.get("nome", nome)
+unidade = ctx.get("unidade", unidade)
 
 ranking = resultado["ranking"]
 estudo = resultado["estudo"]
@@ -331,6 +333,19 @@ st.markdown(
     f'<p class="small-note">A seleção do modelo é estatística. A interpretação física deve considerar modos de falha e evidências de campo.</p></div>',
     unsafe_allow_html=True
 )
+
+st.markdown("### Tabela comparativa de confiabilidade — Kaplan-Meier × distribuições")
+st.caption("Cada linha usa um tempo observado da amostra. Kaplan-Meier mostra a confiabilidade empírica; as demais colunas mostram R(t) estimada por cada distribuição ajustada.")
+km_df = resultado["kaplan_meier"].copy()
+comp = pd.DataFrame({"Tempo": km_df["Tempo"].astype(float), "Kaplan-Meier": km_df["Confiabilidade KM"].astype(float)})
+for nome_modelo in ranking["Distribuição"].tolist():
+    info_modelo = resultado["modelos"][nome_modelo]
+    comp[nome_modelo] = info_modelo["dist"].sf(comp["Tempo"].to_numpy(dtype=float), *info_modelo["parametros"])
+comp_show = comp.copy()
+comp_show["Tempo"] = comp_show["Tempo"].map(lambda v: f"{v:.2f}")
+for c in comp_show.columns[1:]:
+    comp_show[c] = comp_show[c].map(lambda v: f"{v*100:.2f}%")
+st.dataframe(comp_show, hide_index=True, use_container_width=True, height=min(620, 40 + 35*len(comp_show)))
 
 st.markdown("### Curva e tabela de confiabilidade")
 dist = pref_info["dist"]; params = pref_info["parametros"]
@@ -429,16 +444,20 @@ with g3:
     fig,ax=plt.subplots(figsize=(7,4)); ax.plot(x,haz); ax.set_title(f"Taxa de risco h(t) — {modelo}"); ax.grid(alpha=.2); st.pyplot(fig,use_container_width=True); plt.close(fig)
     st.caption("Interpretação: intensidade instantânea de falha entre itens que sobreviveram até t.")
 with g4:
-    falhas=sorted([t for t,e in zip(tempos,eventos) if e==1])
-    probs=(np.arange(1,len(falhas)+1)-.5)/len(falhas)
-    q=np.asarray(d.ppf(probs,*p),dtype=float); obs=np.asarray(falhas,dtype=float)
-    mask=np.isfinite(q)&np.isfinite(obs)
-    fig,ax=plt.subplots(figsize=(7,4)); ax.scatter(q[mask],obs[mask],s=24)
-    if mask.any():
-        mn=min(q[mask].min(),obs[mask].min()); mx=max(q[mask].max(),obs[mask].max()); ax.plot([mn,mx],[mn,mx],linestyle="--")
-    ax.set_title(f"Q-Q Plot — {modelo}"); ax.set_xlabel("Quantis teóricos"); ax.set_ylabel("Observado"); ax.grid(alpha=.2)
+    km_plot = resultado["kaplan_meier"].copy()
+    km_t = np.r_[0.0, km_plot["Tempo"].to_numpy(dtype=float)]
+    km_s = np.r_[1.0, km_plot["Confiabilidade KM"].to_numpy(dtype=float)]
+    fig,ax=plt.subplots(figsize=(7,4))
+    ax.step(km_t, km_s, where="post", linewidth=2.0, label="Kaplan-Meier")
+    ax.plot(x, sf, linewidth=2.0, label=f"{modelo}")
+    cens = km_plot[km_plot["Censuras"] > 0]
+    if not cens.empty:
+        ax.scatter(cens["Tempo"], cens["Confiabilidade KM"], marker="+", s=55, label="Censura")
+    ax.set_title(f"Kaplan-Meier × {modelo}")
+    ax.set_xlabel(f"Tempo ({unidade})"); ax.set_ylabel("Confiabilidade")
+    ax.set_ylim(0,1.05); ax.grid(alpha=.2); ax.legend(fontsize=8)
     st.pyplot(fig,use_container_width=True); plt.close(fig)
-    st.caption("Interpretação: proximidade da diagonal indica maior compatibilidade do formato dos dados com o modelo.")
+    st.caption("Interpretação: a escada é a confiabilidade empírica de Kaplan-Meier; a curva contínua é o modelo ajustado. Quanto mais próxima a curva estiver da escada, maior a aderência visual.")
 
 pdf = pdf_resumo(nome, unidade, resultado)
 if pdf:
