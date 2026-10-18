@@ -53,6 +53,16 @@ def fase_weibull(beta):
         return "Vida útil / falhas aleatórias", "taxa de falha aproximadamente constante"
     return "Desgaste / envelhecimento (Wear-out)", "taxa de falha crescente"
 
+
+def modelo_preferencial_metodologico(ranking, n_observacoes):
+    """Seleciona internamente o modelo preferencial conforme o critério metodológico."""
+    candidatos = ranking.copy()
+    if int(n_observacoes) < 150:
+        candidatos = candidatos[candidatos["Distribuição"].astype(str).str.lower() != "gamma"]
+    if candidatos.empty:
+        return str(ranking.iloc[0]["Distribuição"])
+    return str(candidatos.sort_values("AIC", ascending=True).iloc[0]["Distribuição"])
+
 def read_upload(upload):
     nome = upload.name.lower()
     if nome.endswith(".csv"):
@@ -97,7 +107,7 @@ def pdf_resumo(nome, unidade, resultado):
     ranking = resultado["ranking"].copy()
     estudo = resultado["estudo"]
     w = resultado["weibull"]
-    pref = resultado["selecao"]["modelo_preferencial"]
+    pref = modelo_preferencial_metodologico(ranking, estudo["n"])
 
     def fmt(v, casas=3):
         try:
@@ -133,7 +143,7 @@ def pdf_resumo(nome, unidade, resultado):
         Paragraph(f"<b>Estudo:</b> {nome}", styles["BodyText"]),
         Paragraph(f"<b>Data:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["BodyText"]),
         Paragraph(f"<b>Base:</b> {estudo['n']} observações de vida; {estudo['falhas']} falhas; {estudo['censuras']} censuras.", styles["BodyText"]),
-        Paragraph(f"<b>Modelo preferencial pelo AIC:</b> {pref}", styles["BodyText"]),
+        Paragraph(f"<b>Modelo preferencial:</b> {pref}", styles["BodyText"]),
         Spacer(1,8), Paragraph("1. Ranking das distribuições", styles["SCASection"])
     ]
 
@@ -144,7 +154,7 @@ def pdf_resumo(nome, unidade, resultado):
                      fmt(r.get("B10"),2),fmt(r.get("B50"),2),fmt(r.get("B90"),2),fmt(r.get("Tempo R Alvo"),2)])
     story += [tab(rows,[12*mm,34*mm,24*mm,19*mm,19*mm,19*mm,22*mm,20*mm,18*mm,18*mm,18*mm,24*mm],6.5),
               Spacer(1,6),
-              Paragraph("Menor AIC = modelo preferencial; Delta AIC <= 2 = modelo competitivo.",styles["SCASmall"]),
+              Paragraph("Delta AIC <= 2 indica modelos estatisticamente competitivos.",styles["SCASmall"]),
               Spacer(1,8), Paragraph("2. Weibull 2P",styles["SCASection"]),
               tab([["Beta",f"Eta ({unidade})",f"MTTF ({unidade})",f"B10 ({unidade})",f"B50 ({unidade})",f"B90 ({unidade})"],
                    [fmt(w["beta"],4),fmt(w["eta"],2),fmt(w["mttf"],2),fmt(w["b10"],2),fmt(w["b50"],2),fmt(w["b90"],2)]],
@@ -314,8 +324,8 @@ ranking = resultado["ranking"]
 estudo = resultado["estudo"]
 sel = resultado["selecao"]
 w = resultado["weibull"]
-pref_nome = sel["modelo_preferencial"]
-pref_row = ranking.iloc[0]
+pref_nome = modelo_preferencial_metodologico(ranking, estudo["n"])
+pref_row = ranking.loc[ranking["Distribuição"] == pref_nome].iloc[0]
 pref_info = resultado["modelos"][pref_nome]
 fase, comportamento = fase_weibull(float(w["beta"]))
 
@@ -328,7 +338,7 @@ m4.metric("Modelo preferencial", pref_nome)
 
 st.markdown(
     f'<div class="sca-card"><span class="sca-pill">CONCLUSÃO TÉCNICA</span>'
-    f'<h3>{pref_nome} apresentou o menor AIC</h3>'
+    f'<h3>Distribuição preferencial: {pref_nome}</h3>'
     f'<p>Weibull 2P: β = <b>{w["beta"]:.2f}</b> — {fase}; {comportamento}.</p>'
     f'<p class="small-note">A seleção do modelo é estatística. A interpretação física deve considerar modos de falha e evidências de campo.</p></div>',
     unsafe_allow_html=True
