@@ -286,6 +286,11 @@ def analisar_confiabilidade(
             mae = float(np.mean(np.abs(erros)))
             rmse = float(np.sqrt(np.mean(erros**2)))
             desvio_max = float(np.max(np.abs(erros)))
+            km_vals = km["Confiabilidade KM"].to_numpy(dtype=float)
+            if len(km_vals) >= 2 and np.std(km_vals) > 0 and np.std(r_modelo_km) > 0:
+                correlacao_km = float(np.corrcoef(km_vals, r_modelo_km)[0, 1])
+            else:
+                correlacao_km = np.nan
 
             linhas.append({
                 "Distribuição": nome,
@@ -307,6 +312,7 @@ def analisar_confiabilidade(
                 "MAE KM": mae,
                 "RMSE KM": rmse,
                 "Desvio Máx KM": desvio_max,
+                "Correlação KM": correlacao_km,
             })
 
             modelos[nome] = {

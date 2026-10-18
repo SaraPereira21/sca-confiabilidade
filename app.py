@@ -9,7 +9,7 @@ import streamlit as st
 
 from motor_confiabilidade import analisar_confiabilidade
 
-SCA_ENGINE_VERSION = "2026.10.18-gumbel-min-v1"
+SCA_ENGINE_VERSION = "2026.10.18-km-concordancia-v1"
 
 st.set_page_config(
     page_title="SCA — Validação Acadêmica",
@@ -448,6 +448,30 @@ x=np.linspace(0,max(tempos)*1.10,400)
 sf=d.sf(x,*p); pdf=d.pdf(x,*p)
 with np.errstate(divide="ignore",invalid="ignore"):
     haz=np.where(sf>1e-12,pdf/sf,np.nan)
+
+# Diagnóstico de concordância no mesmo conceito da extensão usada em aula:
+# eixo X = Kaplan-Meier; eixo Y = R(t) do modelo nos mesmos tempos.
+km_diag = resultado["kaplan_meier"].copy()
+km_x = km_diag["Confiabilidade KM"].to_numpy(dtype=float)
+modelo_y = d.sf(km_diag["Tempo"].to_numpy(dtype=float), *p)
+cor_km = float(rr.get("Correlação KM", np.nan))
+st.markdown(f"### Kaplan-Meier × {modelo}")
+fig, ax = plt.subplots(figsize=(6.2,5.2))
+ax.scatter(km_x, modelo_y, s=28, label=modelo)
+lo = float(min(np.nanmin(km_x), np.nanmin(modelo_y), 0.0))
+hi = float(max(np.nanmax(km_x), np.nanmax(modelo_y), 1.0))
+ax.plot([lo, hi], [lo, hi], linewidth=1.8, label="Concordância perfeita")
+ax.set_xlim(max(-0.05, lo-0.03), min(1.05, hi+0.03))
+ax.set_ylim(max(-0.05, lo-0.03), min(1.05, hi+0.03))
+ax.set_xlabel("Kaplan-Meier")
+ax.set_ylabel(modelo)
+ax.grid(alpha=.2)
+ax.legend(fontsize=8)
+if np.isfinite(cor_km):
+    ax.text(0.04, 0.93, f"Cor = {cor_km:.3f}", transform=ax.transAxes, fontweight="bold")
+st.pyplot(fig, use_container_width=False)
+plt.close(fig)
+st.caption("Cada ponto compara a confiabilidade empírica de Kaplan-Meier com R(t) estimada pelo modelo no mesmo tempo. Quanto mais próximos da diagonal, maior a concordância. Cor é a correlação linear entre as duas séries e deve ser usada como diagnóstico complementar, não isoladamente como prova de melhor modelo.")
 
 g1,g2=st.columns(2)
 with g1:
