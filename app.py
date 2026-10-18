@@ -205,7 +205,7 @@ with st.sidebar:
     st.markdown("## SCA")
     st.caption("Sistema de Confiabilidade de Ativos")
     st.markdown("---")
-    pagina = st.radio("Navegação", ["Análise de Vida", "Metodologia", "MTBF e aplicação"], label_visibility="collapsed")
+    pagina = st.radio("Navegação", ["Análise de Vida", "Metodologia"], label_visibility="collapsed")
     st.markdown("---")
     st.caption("Versão DEMO • Validação acadêmica\n\nSem login • Sem acesso à base operacional")
 
@@ -386,6 +386,25 @@ wc3.metric("MTTF",f'{w["mttf"]:.2f} {unidade}')
 wc4.metric("B10",f'{w["b10"]:.2f} {unidade}')
 wc5.metric("B50",f'{w["b50"]:.2f} {unidade}')
 st.info(f"**Interpretação:** {fase}; {comportamento}. β caracteriza o comportamento estatístico da taxa de falha.")
+
+# Incerteza estatística — IC 95% já calculado pelo motor validado para Weibull 2P.
+ic95 = w.get("ic95", {})
+if ic95.get("disponivel"):
+    st.markdown("### Intervalos de confiança — Weibull 2P")
+    st.caption("IC 95%: faixa de incerteza estatística ao redor da estimativa. Limite inferior (LI) e limite superior (LS) não são limites operacionais do equipamento.")
+    ic_rows = []
+    for rotulo, chave, sufixo in [("β", "beta", ""), ("η", "eta", unidade), ("B10", "B10", unidade), ("B50", "B50", unidade), ("B90", "B90", unidade)]:
+        item = ic95.get(chave, {})
+        if item:
+            ic_rows.append({
+                "Parâmetro": rotulo,
+                "Estimativa": f'{item["estimativa"]:.4f}' if chave == "beta" else f'{item["estimativa"]:.2f} {sufixo}'.strip(),
+                "LI 95%": f'{item["ic95_inferior"]:.4f}' if chave == "beta" else f'{item["ic95_inferior"]:.2f} {sufixo}'.strip(),
+                "LS 95%": f'{item["ic95_superior"]:.4f}' if chave == "beta" else f'{item["ic95_superior"]:.2f} {sufixo}'.strip(),
+            })
+    st.dataframe(pd.DataFrame(ic_rows), hide_index=True, use_container_width=True)
+else:
+    st.caption("Intervalos de confiança da Weibull indisponíveis para esta amostra: " + str(ic95.get("motivo", "não foi possível estimar a incerteza.")))
 
 st.markdown("## Diagnósticos por distribuição")
 modelo = st.selectbox("Distribuição para inspeção", ranking["Distribuição"].tolist())
